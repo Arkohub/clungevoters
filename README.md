@@ -1,5 +1,38 @@
-# clungevoters
-A system to count votes using openCV
+# Raised Hand Vote Counter (OpenCV + MediaPipe)
+
+A real-time Python application that uses a webcam feed to:
+
+- Detect people in the frame
+- Estimate pose for each detected person
+- Identify raised hands
+- Count the number of people currently voting (raised hand)
+- Display live visuals and vote count on screen
+
+## Features
+
+- ✅ Webcam/camera capture with OpenCV
+- ✅ Person detection (HOG + SVM)
+- ✅ Raised-hand detection per person using MediaPipe pose landmarks
+- ✅ Real-time vote count overlay
+- ✅ Visual indicators:
+  - Bounding boxes around detected people
+  - `VOTE` label for people with raised hands
+  - Wrist highlight markers for raised hands
+- ✅ Keyboard controls:
+  - `F` → snapshot/freeze count (toggle freeze/unfreeze)
+  - `R` → reset to live counting mode
+  - `Q` or `Esc` → exit
+- ✅ On-screen instructions and current vote count
+
+## Project Structure
+
+```text
+vote_counter/
+├── app.py
+├── requirements.txt
+└── README.md
+```
+
 ## Setup
 
 ### 1) Create and activate a virtual environment (recommended)
