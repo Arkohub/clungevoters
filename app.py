@@ -1,10 +1,51 @@
 import argparse
+import importlib
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 import cv2
-import mediapipe as mp
 import numpy as np
+
+try:
+    import mediapipe as mp
+except Exception as mp_import_error:  # pragma: no cover - import failure path
+    mp = None
+    _MP_IMPORT_ERROR = mp_import_error
+else:
+    _MP_IMPORT_ERROR = None
+
+
+def resolve_mediapipe_pose_module():
+    """Return MediaPipe pose module with compatibility fallbacks."""
+    if mp is None:
+        raise ImportError(
+            "MediaPipe could not be imported. Install dependencies with `pip install -r requirements.txt`. "
+            f"Original error: {_MP_IMPORT_ERROR}"
+        )
+
+    if hasattr(mp, "solutions") and hasattr(mp.solutions, "pose"):
+        return mp.solutions.pose
+
+    # Compatibility fallback where `solutions` exists as a submodule but not a top-level attribute.
+    try:
+        mp_solutions = importlib.import_module("mediapipe.solutions")
+        if hasattr(mp_solutions, "pose"):
+            return mp_solutions.pose
+    except Exception:
+        pass
+
+    # Older package layouts may expose pose via mediapipe.python.solutions.pose.
+    try:
+        return importlib.import_module("mediapipe.python.solutions.pose")
+    except Exception as fallback_error:
+        mp_location = getattr(mp, "__file__", "unknown location")
+        raise ImportError(
+            "MediaPipe is installed but Pose APIs are unavailable (missing `mediapipe.solutions.pose`). "
+            "This app currently relies on the classic Solutions Pose API; newer task-only builds are not compatible. "
+            "Use a stable 0.10.x build such as: `pip uninstall -y mediapipe && pip install mediapipe==0.10.9`, "
+            "and ensure your project has no file/folder named `mediapipe`. "
+            f"Loaded mediapipe from: {mp_location}."
+        ) from fallback_error
 
 
 @dataclass
@@ -26,15 +67,21 @@ class RaisedHandVoteCounter:
         self.hog = cv2.HOGDescriptor()
         self.hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
 
-        self.mp_pose = mp.solutions.pose
-        self.pose = self.mp_pose.Pose(
-            static_image_mode=False,
-            model_complexity=1,
-            smooth_landmarks=True,
-            enable_segmentation=False,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
-        )
+        self.mp_pose = resolve_mediapipe_pose_module()
+        try:
+            self.pose = self.mp_pose.Pose(
+                static_image_mode=False,
+                model_complexity=1,
+                smooth_landmarks=True,
+                enable_segmentation=False,
+                min_detection_confidence=0.5,
+                min_tracking_confidence=0.5,
+            )
+        except Exception as pose_init_error:
+            raise RuntimeError(
+                "MediaPipe Pose failed to initialize. Verify a compatible install with "
+                "`pip install mediapipe==0.10.9` (or another 0.10.x release)."
+            ) from pose_init_error
 
         self.detection_stride = max(1, detection_stride)
         self.hand_raise_px_offset = hand_raise_px_offset
@@ -268,12 +315,14 @@ def main() -> None:
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
 
-    vote_counter = RaisedHandVoteCounter(detection_stride=args.detection_stride)
-
-    freeze_active = False
-    frozen_vote_count = 0
+    vote_counter: Optional[RaisedHandVoteCounter] = None
 
     try:
+        vote_counter = RaisedHandVoteCounter(detection_stride=args.detection_stride)
+
+        freeze_active = False
+        frozen_vote_count = 0
+
         while True:
             ok, frame = cap.read()
             if not ok:
@@ -329,8 +378,14 @@ def main() -> None:
                 freeze_active = False
                 frozen_vote_count = 0
 
+    except (ImportError, RuntimeError) as setup_error:
+        raise RuntimeError(
+            "Failed to initialize MediaPipe for vote counting. "
+            "Run `pip install -r requirements.txt` and verify `python -c \"import mediapipe as mp; print(mp.__version__)\"`."
+        ) from setup_error
     finally:
-        vote_counter.close()
+        if vote_counter is not None:
+            vote_counter.close()
         cap.release()
         cv2.destroyAllWindows()
 
